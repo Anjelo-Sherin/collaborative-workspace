@@ -1,0 +1,16 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+
+# Build outputs
+public/bundle.js
+public/bundle.js.map
+
+# Local persistent data
+data/
+*.db
+
+# Environment & OS
+.env
+.env.local
+.DS_Store

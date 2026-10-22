@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synapse Collab — Real-Time Collaborative Workspace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="theme-dark">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <div class="brand-logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-title">Synapse Collab</span>
+            <span class="brand-tag">CRDT + Canvas</span>
+          </div>
+        </div>
+
+        <div class="room-selector">
+          <span class="room-label">Room:</span>
+          <span id="current-room-badge" class="room-badge">default</span>
+          <button id="btn-share-room" class="btn-icon-subtle" title="Copy shareable link">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <span>Share</span>
+          </button>
+        </div>
+
+        <div class="room-switcher-box">
+          <input type="text" id="room-input" placeholder="Join room..." />
+          <button id="btn-switch-room" class="btn-subtle-small">Go</button>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <!-- View switchers -->
+        <div class="view-toggles">
+          <button class="btn-toggle active" data-view="split" title="Side-by-side Code & Whiteboard">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="12" y1="3" x2="12" y2="21" />
+            </svg>
+            <span>Split</span>
+          </button>
+          <button class="btn-toggle" data-view="code" title="Code Editor Only">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            <span>Code</span>
+          </button>
+          <button class="btn-toggle" data-view="whiteboard" title="Whiteboard Canvas Only">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19l7-7 3 3-7 7-3-3z" />
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+            </svg>
+            <span>Canvas</span>
+          </button>
+        </div>
+
+        <!-- Language selector -->
+        <div class="lang-selector-group">
+          <select id="editor-language-select" class="select-lang">
+            <option value="javascript">JavaScript (Node)</option>
+            <option value="python">Python 3</option>
+            <option value="typescript">TypeScript</option>
+            <option value="html">HTML</option>
+            <option value="css">CSS</option>
+            <option value="json">JSON</option>
+            <option value="cpp">C++</option>
+            <option value="markdown">Markdown</option>
+          </select>
+        </div>
+
+        <!-- Run button -->
+        <button id="btn-run-code" class="btn-run" title="Execute in secure sandbox (Ctrl+Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          <span>Run</span>
+          <span class="shortcut-pill">⌘↵</span>
+        </button>
+
+        <!-- Replay mode button -->
+        <button id="btn-toggle-replay" class="btn-replay" title="View historical edits & replay session">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 8 14" />
+          </svg>
+          <span>Replay</span>
+        </button>
+      </div>
+
+      <div class="header-right">
+        <!-- Active Collaborators -->
+        <div class="collaborators-badge" title="Active peers in room">
+          <span class="dot-online"></span>
+          <span id="collaborators-count">1</span>
+          <span class="text-xs text-muted">online</span>
+        </div>
+
+        <!-- User profile -->
+        <div class="user-chip" id="btn-edit-user" title="Click to change your display name">
+          <span id="user-avatar" class="user-chip-avatar">A</span>
+          <span id="user-name-display" class="user-chip-name">Anonymous</span>
+        </div>
+
+        <!-- Connection status -->
+        <div class="connection-status" title="Yjs CRDT WebSocket Status">
+          <span id="connection-status-dot" class="status-indicator connecting"></span>
+          <span id="connection-status-text" class="status-text">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Session Replay Drawer (Hidden by default) -->
+    <div id="replay-drawer" class="replay-drawer-wrapper hidden"></div>
+
+    <!-- Main Workspace Area -->
+    <main class="app-main">
+      <div id="workspace-grid" class="workspace-grid view-split">
+        <!-- LEFT PANEL: Code Editor & Execution Console -->
+        <section class="panel-column panel-code">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <span class="file-icon">⚡</span>
+              <span class="file-name">workspace.js</span>
+              <span class="crdt-badge" title="Changes merge without conflicts">CRDT Synced</span>
+            </div>
+            <div class="panel-actions">
+              <button id="btn-download-code" class="btn-panel-action" title="Download code file">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Monaco Editor Mount Container -->
+          <div class="editor-wrapper">
+            <div id="monaco-editor-container" class="monaco-container"></div>
+          </div>
+
+          <!-- Code Runner Console Drawer -->
+          <div class="console-drawer" id="console-drawer">
+            <div class="console-header">
+              <div class="console-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+                <span>Execution Output</span>
+                <span id="console-status-badge" class="badge-idle">IDLE</span>
+              </div>
+              <div class="console-actions">
+                <button id="btn-clear-console" class="btn-console-clear">Clear</button>
+              </div>
+            </div>
+            <div class="console-body">
+              <pre id="console-output-text" class="console-text">// Press 'Run' or Cmd/Ctrl+Enter to execute JavaScript / Python in isolated sandbox...</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- RIGHT PANEL: Collaborative Whiteboard Canvas -->
+        <section class="panel-column panel-whiteboard">
+          <div class="panel-header whiteboard-header">
+            <!-- Whiteboard Drawing Toolbar -->
+            <div class="toolbar-tools">
+              <button class="tool-btn active" data-tool="pen" title="Freehand Pen (P)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                  <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="line" title="Straight Line">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="19" x2="19" y2="5" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="arrow" title="Arrow (A)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="19" x2="19" y2="5" />
+                  <polyline points="10 5 19 5 19 14" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="rect" title="Rectangle (R)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="circle" title="Circle / Ellipse (C)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="9" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="text" title="Text Note (T)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="4 7 4 4 20 4 20 7" />
+                  <line x1="9" y1="20" x2="15" y2="20" />
+                  <line x1="12" y1="4" x2="12" y2="20" />
+                </svg>
+              </button>
+              <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- Separator -->
+            <div class="toolbar-sep"></div>
+
+            <!-- Color Palette -->
+            <div class="toolbar-colors" id="whiteboard-palette"></div>
+            <input type="color" id="custom-color-picker" value="#38bdf8" title="Custom color" class="color-native" />
+
+            <!-- Width Selector -->
+            <select id="whiteboard-stroke-width" class="select-stroke" title="Stroke Width">
+              <option value="2">2px</option>
+              <option value="3" selected>3px</option>
+              <option value="6">6px</option>
+              <option value="12">12px</option>
+            </select>
+
+            <!-- Fill Toggle -->
+            <label class="checkbox-fill" title="Fill shape with color">
+              <input type="checkbox" id="whiteboard-fill-toggle" />
+              <span>Fill</span>
+            </label>
+
+            <!-- Separator -->
+            <div class="toolbar-sep"></div>
+
+            <!-- Canvas actions -->
+            <div class="toolbar-actions">
+              <button id="btn-wb-undo" class="btn-tool-action" title="Undo your last stroke">↶</button>
+              <button id="btn-wb-clear" class="btn-tool-action" title="Clear Canvas">🗑</button>
+              <button id="btn-wb-export" class="btn-tool-action" title="Export as PNG">📥 PNG</button>
+            </div>
+          </div>
+
+          <!-- Interactive Canvas Mount -->
+          <div class="canvas-wrapper">
+            <canvas id="whiteboard-canvas"></canvas>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Collapsible Sidebar: Active Collaborators & Real-Time Chat -->
+      <aside class="sidebar-chat">
+        <div class="sidebar-section sidebar-users">
+          <div class="sidebar-header">
+            <span>Room Collaborators</span>
+          </div>
+          <div id="collaborators-list" class="collaborators-pill-list"></div>
+        </div>
+
+        <div class="sidebar-section sidebar-messages">
+          <div class="sidebar-header">
+            <span>Room Chat</span>
+          </div>
+          <div id="chat-messages-container" class="chat-messages"></div>
+          <div class="chat-input-bar">
+            <input type="text" id="chat-input-text" placeholder="Type a message..." maxlength="500" />
+            <button id="btn-chat-send" class="btn-send-chat">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Monaco Editor AMD Loader from local node_modules -->
+    <script src="/vs/loader.js"></script>
+    <!-- Compiled Client Application Bundle -->
+    <script type="module" src="/bundle.js"></script>
+  </body>
+</html>
