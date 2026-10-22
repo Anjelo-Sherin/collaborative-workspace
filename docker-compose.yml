@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synapse-collaborative-workspace
+    ports:
+      - "8012:8012"
+    volumes:
+      - ./data/rooms:/app/data/rooms
+    environment:
+      - NODE_ENV=production
+      - PORT=8012
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8012/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

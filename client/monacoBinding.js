@@ -52,6 +52,10 @@ export class MonacoBinding {
 
       this.isApplyingRemote = true;
       try {
+        if (this.model.getValue() === '' && this.yText.length > 0) {
+          this.model.setValue(this.yText.toString());
+          return;
+        }
         let index = 0;
         for (const delta of event.delta) {
           if (delta.retain !== undefined) {

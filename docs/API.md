@@ -1,79 +1,151 @@
-# API & Protocol Specification — Synapse Collab
+# API Reference — Synapse Collab
 
-## HTTP Endpoints
+## 1. REST Endpoints
 
-### 1. Health Check
-- **Endpoint:** `GET /health`
-- **Response:**
-  ```json
-  {
-    "status": "healthy",
-    "rooms": 2,
-    "uptime": 128.4
-  }
-  ```
+### Health Check
+Retrieves system operational status, active room counts, and server uptime.
 
-### 2. Code Execution
-- **Endpoint:** `POST /api/run`
-- **Content-Type:** `application/json`
-- **Request Body:**
-  ```json
-  {
-    "language": "javascript",
-    "code": "console.log('Hello World!');"
-  }
-  ```
-- **Supported Languages:** `javascript`, `python`
-- **Response (200 OK):**
-  ```json
-  {
-    "stdout": "Hello World!\n",
-    "stderr": "",
-    "exitCode": 0,
-    "executionTimeMs": 42
-  }
-  ```
-- **Error Response (Execution Timeout / 400 Bad Request):**
-  ```json
-  {
-    "stdout": "",
-    "stderr": "Error: Execution timed out (limit: 1000ms)",
-    "exitCode": -1,
-    "timedOut": true
-  }
-  ```
+- **URL**: `/api/health`
+- **Method**: `GET`
+- **Response**: `200 OK`
 
-### 3. Room Snapshot & Replay
-- **Endpoint:** `GET /api/rooms/:roomId/history`
-- **Response:**
-  ```json
-  {
-    "roomId": "default",
-    "updatesCount": 142,
-    "createdTimestamp": 1718000000,
-    "snapshots": [ ... ]
-  }
-  ```
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 1420,
+  "activeRooms": 3,
+  "timestamp": "2026-10-22T20:00:00.000Z"
+}
+```
 
 ---
 
-## WebSocket Protocol
+### List Rooms
+Returns all active in-memory and persisted storage rooms with client presence counts and metadata.
 
-WebSocket connection URL: `ws://localhost:3012/ws?room=<roomId>&username=<username>&color=<hexColor>`
+- **URL**: `/api/rooms`
+- **Method**: `GET`
+- **Response**: `200 OK`
 
-### Message Frames
-Binary frames carry Yjs synchronization packets conforming to `@y/protocols/sync`:
-- `0x00`: Sync Step 1 (State Vector request)
-- `0x01`: Sync Step 2 (Update delta payload)
-- `0x02`: Incremental update broadcast
-
-JSON frames carry non-CRDT control messages (e.g., room chat, execution trigger):
 ```json
 {
-  "type": "chat",
-  "username": "DevUser",
-  "color": "#4A90E2",
-  "text": "Check out line 14!",
-  "timestamp": 1718000100
+  "rooms": [
+    {
+      "roomId": "demo-workspace",
+      "connectedClients": 2,
+      "codeLength": 542,
+      "whiteboardElements": 10,
+      "chatMessages": 4,
+      "createdAt": "2026-10-22T18:50:00.000Z",
+      "lastActive": "2026-10-22T20:05:00.000Z",
+      "updatedAt": "2026-10-22T20:05:01.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### Fetch Room Session Replay History
+Retrieves recorded historical snapshots and checkpoints for a specific room.
+
+- **URL**: `/api/room/:id/replay`
+- **Method**: `GET`
+- **Parameters**: `id` (string) — The unique room identifier.
+- **Response**: `200 OK`
+
+```json
+{
+  "roomId": "demo-workspace",
+  "snapshots": [
+    {
+      "id": 1,
+      "timestamp": 1792695600000,
+      "author": "Grace Hopper",
+      "action": "add_whiteboard_diagram",
+      "codeSnippet": "// Welcome to Synapse Collab...",
+      "codeLength": 542,
+      "strokeCount": 8,
+      "updateBase64": "AQX..."
+    }
+  ]
+}
+```
+
+---
+
+### Execute Sandboxed Code
+Submits code to be compiled or interpreted inside an isolated process with strict time and memory bounds.
+
+- **URL**: `/api/run`
+- **Method**: `POST`
+- **Content-Type**: `application/json`
+
+#### Request Body
+```json
+{
+  "language": "javascript",
+  "code": "console.log('Result:', [1, 2, 3].map(x => x * 2));",
+  "stdin": "",
+  "timeoutMs": 4000
+}
+```
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `language` | string | Yes | Target language (`javascript`, `python`, `typescript`) |
+| `code` | string | Yes | Source code string to execute |
+| `stdin` | string | No | Optional standard input buffer to stream into process |
+| `timeoutMs` | number | No | Execution timeout budget (default `4000`, min `500`, max `10000`) |
+
+#### Response `200 OK` (Execution Success)
+```json
+{
+  "success": true,
+  "exitCode": 0,
+  "stdout": "Result: [ 2, 4, 6 ]\n",
+  "stderr": "",
+  "durationMs": 38,
+  "timedOut": false,
+  "language": "javascript"
+}
+```
+
+#### Response `200 OK` (Timeout Termination)
+```json
+{
+  "success": false,
+  "exitCode": null,
+  "stdout": "",
+  "stderr": "[Execution Timed Out]: Process exceeded 4000ms time limit and was terminated.",
+  "durationMs": 4002,
+  "timedOut": true,
+  "language": "javascript"
+}
+```
+
+---
+
+## 2. WebSocket Synchronization Protocol
+
+- **Endpoint**: `/ws`
+- **Query Parameters**:
+  - `room` (string, default: `default`): Target room channel name.
+  - `user` (string, default: `Anonymous`): Initial collaborator display name.
+  - `color` (string, default: `#3b82f6`): Hex color assigned to the user for cursors and pointer markers.
+
+### Message Framing
+Binary frames use the standard Yjs synchronization message format:
+- `Byte 0 = 0`: **Sync Message** (`SyncStep1`, `SyncStep2`, `Update`).
+- `Byte 0 = 1`: **Awareness Message** (User presence, cursor positions, canvas pointer coordinates).
+- `Byte 0 = 2`: **Authentication / Custom Handshake**.
+
+JSON text frames are accepted for client registration and real-time room chat:
+```json
+{
+  "type": "chat_message",
+  "user": "Alan Turing",
+  "color": "#3b82f6",
+  "text": "Concurrent edits merged flawlessly with zero merge conflicts!"
 }
 ```

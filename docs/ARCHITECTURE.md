@@ -1,72 +1,94 @@
-# Architecture Specification — Synapse Collab
+# System Architecture — Synapse Collab
 
-## Overview
+## 1. High-Level Architectural Overview
 
-Synapse Collab is a real-time collaborative workspace supporting synchronous multi-user code editing, collaborative whiteboard sketching, chat, user presence awareness, and sandboxed code execution.
-
-The architecture is built around **Conflict-Free Replicated Data Types (CRDTs)** via the **Yjs** library, enabling decentralization, peer-to-peer convergence, and network resilience.
-
----
-
-## CRDT vs. Operational Transformation (OT)
-
-| Dimension | Operational Transformation (OT) | Yjs CRDT (Synapse Collab) |
-| :--- | :--- | :--- |
-| **Centralization** | Strict central authority required to sequence operations | Decentralized / Peer-to-Peer capable; server acts as a relay |
-| **Complexity** | Exponentially complex transformation functions (TP2 property) | Mathematical convergence baked into underlying data structure |
-| **Offline Editing** | Prone to desync when replaying long divergence logs | Effortless merging of divergent branches via state vectors |
-| **Network Efficiency** | Verbose JSON operations | Highly optimized binary delta encodings (Lib0 / Yjs encoding) |
-
----
-
-## Core Components
+Synapse Collab is built upon a decentralized Conflict-Free Replicated Data Type (CRDT) foundation utilizing **Yjs**, synchronized through full-duplex WebSockets with stateful room persistence and an isolated process sandbox for code execution.
 
 ```mermaid
 flowchart TD
-    subgraph Clients["Connected Clients (Browser)"]
-        C1["Client A (Monaco + Whiteboard)"]
-        C2["Client B (Monaco + Whiteboard)"]
+    subgraph Clients["Collaborative Browser Clients"]
+        ClientA["User A Browser\n(Monaco + Canvas + Chat)"]
+        ClientB["User B Browser\n(Monaco + Canvas + Chat)"]
     end
 
-    subgraph Server["Synapse Collab Server (Node.js)"]
-        WS["WebSocket Server (ws)"]
-        RM["CRDT Room Manager"]
-        YDoc["In-Memory Y.Doc per Room"]
-        Persist["Binary Update Persistence & Replay"]
-        SB["Subprocess Execution Sandbox"]
+    subgraph Transport["Network Layer"]
+        WS["WebSocket Provider\n(ws://host:8012/ws?room=xyz)"]
+        Awareness["Awareness Protocol\n(Presence, Remote Cursors, Pointers)"]
     end
 
-    C1 <-->|"WebSocket (Yjs Binary Delta Sync)"| WS
-    C2 <-->|"WebSocket (Yjs Binary Delta Sync)"| WS
-    WS <--> RM
-    RM <--> YDoc
-    YDoc <--> Persist
-    WS -.->|"Run Code Request"| SB
+    subgraph Server["Node.js Application Server"]
+        RoomMgr["RoomManager\n(Active Y.Doc Registry)"]
+        CRDTEngine["CRDT Sync Engine\n(y-protocols/sync)"]
+        Debounce["Debounced Persistence\n(1500ms disk sync)"]
+        ReplayEngine["Session Replay Logger\n(State snapshots + deltas)"]
+    end
+
+    subgraph Execution["Sandboxed Execution Engine"]
+        Runner["Process Sandbox\n(Resource-limited runner)"]
+        Limits["Limits: 4s Timeout, 64MB RAM,\n256KB Buffer, SIGKILL tree"]
+    end
+
+    subgraph Storage["Persistent Storage"]
+        BinDisk["Binary CRDT Snapshots\n(data/rooms/*.bin)"]
+        HistoryDisk["Replay Timeline\n(data/rooms/*.history.json)"]
+    end
+
+    ClientA <-->|Binary Updates| WS
+    ClientB <-->|Binary Updates| WS
+    ClientA <-->|Cursor States| Awareness
+    ClientB <-->|Cursor States| Awareness
+
+    WS --> RoomMgr
+    Awareness --> RoomMgr
+    RoomMgr --> CRDTEngine
+
+    CRDTEngine --> Debounce --> BinDisk
+    CRDTEngine --> ReplayEngine --> HistoryDisk
+
+    ClientA -.->|POST /api/run| Runner
+    ClientB -.->|POST /api/run| Runner
+    Runner --> Limits
 ```
-
-### 1. Client Architecture
-- **State Layer (`client/crdtClient.js`):** Hosts the local `Y.Doc` instance, binds to WebSocket transport, and tracks local client ID.
-- **Monaco Binding (`client/monacoBinding.js`):** Couples Monaco editor buffer changes with the shared `Y.Text('monaco')` type and remote awareness cursors (`y-protocols/awareness`).
-- **Whiteboard Engine (`client/whiteboard.js`):** Couples HTML5 Canvas drawing with a shared `Y.Array('whiteboard')` containing stroke and shape vectors.
-- **Session Replay Controller (`client/replay.js`):** Enables timeline navigation across document updates.
-
-### 2. Server Architecture
-- **WebSocket Server (`server/index.js`):** Routes incoming connections to their respective rooms (`/ws?room=<roomId>`).
-- **Room Manager (`server/crdtRoom.js`):** Manages active rooms, tracks connected sockets, broadcasts awareness and document updates.
-- **Persistence (`server/persistence.js`):** Saves Yjs binary update chunks to disk (`data/<roomId>.updates`) and produces snapshots for history replay.
-- **Execution Sandbox (`server/sandbox.js`):** Spawns child processes (`node`, `python3`) with hard resource and time constraints (1000ms max CPU time).
 
 ---
 
-## State Synchronization Protocol
+## 2. CRDT Convergence Engine
 
-1. **Connection Handshake:**
-   - Client sends SyncStep 1 (State Vector of its local `Y.Doc`).
-   - Server responds with SyncStep 2 (Binary updates needed by the client).
-   - Server sends SyncStep 1 (State Vector of the server's `Y.Doc`).
-   - Client responds with SyncStep 2 (Binary updates needed by the server).
-2. **Incremental Updates:**
-   - Any local modification produces an incremental update encoded into a compact binary buffer.
-   - The buffer is transmitted via WebSocket and applied using `Y.applyUpdate(doc, update)`.
-3. **Awareness & Presence:**
-   - User identity, color, mouse position, and code selection ranges are broadcast through the lightweight awareness protocol without bloating document history.
+### Why CRDT (Yjs) over Operational Transformation (OT)
+- **Centralized Dependency Elimination**: Traditional Google Docs architecture uses Operational Transformation (OT), requiring a single authoritative central server to sequence and transform operation indices against concurrent commits.
+- **Mathematical Convergence**: Yjs implements a sequence CRDT based on a block-store structure where characters are represented as unique items with `(clientID, clock)` coordinates. Edits commute deterministically; regardless of network latency, packet reordering, or temporary disconnection, all peers reach identical states once updates exchange completes.
+- **Binary Delta Efficiency**: Yjs encodes state vectors and incremental structural updates in compact binary representation using Variable-Length Unsigned Integers (`varUint`) via `lib0/encoding`. Updates require orders of magnitude fewer bytes than JSON AST transformations.
+
+---
+
+## 3. Collaborative Data Structures
+
+Within each room's root `Y.Doc`:
+
+| Structure Name | Yjs Type | Purpose | Concurrency Strategy |
+| :--- | :--- | :--- | :--- |
+| `monaco` | `Y.Text` | Source code in the collaborative editor | RGA sequence CRDT; characters commute deterministically |
+| `whiteboard` | `Y.Array` | Visual drawing elements (paths, rectangles, circles, arrows, text notes) | Ordered array CRDT; elements are keyed by unique IDs with author attribution |
+| `chat` | `Y.Array` | Room group messaging stream | Append-only CRDT log; sorted by logical clock and client timestamps |
+| `awareness` | `Awareness` | Non-persistent ephemeral state (remote cursors, live canvas pointers, user badges) | Timed TTL ephemeral protocol; auto-expires after 30 seconds of inactivity |
+
+---
+
+## 4. Sandboxed Code Execution Architecture
+
+Code execution occurs inside isolated operating system subprocesses with strict resource fences:
+
+1. **Isolation**: Code is generated into a unique, ephemeral execution directory under the system temporary path (`/tmp/collab-run-<id>/`) with restricted file system permissions.
+2. **Environment Scrubbing**: Sensitive environment variables (e.g. system credentials, token environments) are stripped. Only `PATH`, `LANG`, and localized execution variables are passed.
+3. **Execution Guards**:
+   - **Wall-Clock Time Budget**: Hard execution timer (default: `4,000 ms`, max: `10,000 ms`). If execution exceeds the threshold, the process receives `SIGKILL` to prevent infinite loop resource exhaustion.
+   - **Memory Cap**: Node.js executions are bounded by `--max-old-space-size=64`.
+   - **Output Truncation**: Standard output and error streams are capped at `256 KB` to avoid buffer exhaustion attacks.
+4. **Cleanup Guarantee**: The ephemeral workspace directory is recursively removed in `finally` blocks regardless of normal completion, error, or kill signals.
+
+---
+
+## 5. Persistence and Session Replay Pipeline
+
+- **Debounced Snapshot Storage**: To prevent disk I/O thrashing during burst typing (e.g. 100+ keystrokes/minute), room states are debounced at 1,500 ms intervals before writing binary `Uint8Array` state vectors to disk (`data/rooms/<roomId>.bin`).
+- **History Timeline Scrubber**: Document updates are periodically sampled (5,000 ms interval during active edits) into incremental historical checkpoints (`data/rooms/<roomId>.history.json`). Each checkpoint stores a base64-encoded full state vector, enabling the client's Replay Player to scrub backwards and forwards through any point in the room's development lifecycle.

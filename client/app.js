@@ -59,6 +59,18 @@ class WorkspaceApp {
     this._initMonaco();
     this._initWhiteboard();
     this._bindUIEvents();
+
+    // Check query params for automated demo capture
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autorun') === '1') {
+      setTimeout(() => this.runCode(), 1000);
+    }
+    if (params.get('replay') === '1') {
+      setTimeout(() => this.toggleReplayMode(), 1200);
+    }
+    if (params.get('view')) {
+      setTimeout(() => this.switchView(params.get('view')), 500);
+    }
   }
 
   _getRoomIdFromUrl() {
@@ -108,6 +120,11 @@ class WorkspaceApp {
       onStatusChange: (status) => {
         statusDot.className = `status-indicator ${status}`;
         statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        if (status === 'synced' && this.monacoEditor) {
+          if (this.monacoEditor.getValue() === '' && this.crdtClient.codeText.length > 0) {
+            this.monacoEditor.setValue(this.crdtClient.codeText.toString());
+          }
+        }
       },
       onAwarenessChange: (collaborators) => {
         this._renderCollaborators(collaborators);
@@ -366,6 +383,11 @@ class WorkspaceApp {
     this.currentView = view;
     const splitWorkspace = document.getElementById('workspace-grid');
     splitWorkspace.className = `workspace-grid view-${view}`;
+
+    const viewButtons = document.querySelectorAll('[data-view]');
+    viewButtons.forEach((b) => {
+      b.classList.toggle('active', b.dataset.view === view);
+    });
 
     if (this.monacoEditor) {
       setTimeout(() => this.monacoEditor.layout(), 50);

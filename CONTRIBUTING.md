@@ -1,36 +1,49 @@
 # Contributing to Synapse Collab
 
-Thank you for your interest in contributing to **Synapse Collab**!
+Contributions, bug reports, and suggestions are warmly welcomed! Please review the guidelines below before submitting pull requests.
 
-## How to Contribute
+---
 
-1. **Fork the Repository** on GitHub.
-2. **Clone your fork** locally:
+## 1. Development Workflow
+
+1. **Fork** the repository and clone your fork locally.
+2. Create a new descriptive topic branch:
    ```bash
-   git clone https://github.com/Anjelo-Sherin/day-12-collaborative-workspace.git
+   git checkout -b feat/add-python-autocomplete
    ```
-3. **Create a Feature Branch**:
-   ```bash
-   git checkout -b feature/my-cool-feature
-   ```
-4. **Install Dependencies and Test**:
+3. Install dependencies:
    ```bash
    npm install
-   npm test
    ```
-5. **Make your changes** and verify all tests pass:
+4. Build client assets:
    ```bash
    npm run build
-   npm test
    ```
-6. **Commit & Push**:
+5. Run the local dev server:
    ```bash
-   git commit -m "feat: add support for typescript execution"
-   git push origin feature/my-cool-feature
+   npm run dev
    ```
-7. **Open a Pull Request** describing your changes and link any relevant issues.
 
-## Guidelines
-- Follow existing JavaScript modular standards.
-- Write unit tests under `tests/` for any new CRDT, network, or sandbox functionality.
-- Ensure no secrets or environment tokens are committed.
+---
+
+## 2. Code Quality & Testing
+
+- Before committing, run all automated tests:
+  ```bash
+  npm test
+  ```
+- Ensure any new features include unit/integration tests in the `tests/` directory.
+- Verify CRDT convergence properties when modifying document data structures.
+- Keep dependency additions minimal and justified.
+
+---
+
+## 3. Submitting Pull Requests
+
+1. Commit your changes with clear, semantic commit messages:
+   - `feat:` for new capabilities.
+   - `fix:` for bug fixes.
+   - `docs:` for documentation updates.
+   - `test:` for test additions or modifications.
+2. Push your branch to GitHub and open a Pull Request targeting `main`.
+3. Provide a clear PR description detailing what was changed and how it was tested.
