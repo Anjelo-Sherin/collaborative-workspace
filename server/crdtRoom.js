@@ -182,7 +182,9 @@ export class CRDTRoom {
         }
 
         // Binary message (Yjs sync or awareness)
-        const uint8 = new Uint8Array(message);
+        const uint8 = message instanceof Uint8Array
+          ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength)
+          : new Uint8Array(message);
         const decoder = decoding.createDecoder(uint8);
         const messageType = decoding.readVarUint(decoder);
 
@@ -190,7 +192,10 @@ export class CRDTRoom {
           case MESSAGE_SYNC: {
             const replyEncoder = encoding.createEncoder();
             encoding.writeVarUint(replyEncoder, MESSAGE_SYNC);
-            syncProtocol.readSyncMessage(decoder, replyEncoder, this.ydoc, conn);
+            const syncMsgType = syncProtocol.readSyncMessage(decoder, replyEncoder, this.ydoc, conn);
+            if (syncMsgType === syncProtocol.messageYjsSyncStep1) {
+              syncProtocol.writeSyncStep1(replyEncoder, this.ydoc);
+            }
             if (encoding.length(replyEncoder) > 1) {
               this.sendBinary(conn, encoding.toUint8Array(replyEncoder));
             }
@@ -299,8 +304,8 @@ export class RoomManager {
     const cleanId = (roomId || 'default').trim();
     if (!this.rooms.has(cleanId)) {
       const room = new CRDTRoom(cleanId);
-      await room.init();
       this.rooms.set(cleanId, room);
+      await room.init();
     }
     return this.rooms.get(cleanId);
   }
